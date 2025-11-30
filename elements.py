@@ -2,55 +2,52 @@ import math as m
 import numpy as np
 
 class Node:
-    _registry = 0
+    dof_count = 0
 
-    def __init__(self, coords: np.array, DoFs: tuple):
-        self.coords = coords
-        self.DoFs = DoFs
-        self._registry += 2 
+    def __init__(self, x, y):
+        self.coords = np.array([x, y])
+        self.dofs = [Node.dof_count, Node.dof_count+1, Node.dof_count+2]
+        Node.dof_count += 3
 
-class Element:
-    _registry = []
-
-class Bar(Element):
-    # 1st Order Bar Element - Axial Deformation
+class Element1D:
+    elements = []
 
     def __init__(self, node1: Node, node2: Node):
-        # Append element
-        self._registry.append(self)
+        self.coords1 = node1.coords
+        self.coords2 = node2.coords
+        self.dofs = node1.dofs + node2.dofs
 
-        # Nodes
-        self.node1 = node1
-        self.node2 = node2
+        Element1D.elements.append(self)
 
-        self.DoFs = (self.node1.DoFs[0], self.node1.DoFs[1], self.node1.DoFs[2], self.node2.DoFs[0], self.node2.DoFs[1], self.node2.DoFs[2])
+        self.L= m.sqrt((self.coords1[0]-self.coords2[0])**2 + (self.coords1[1]-self.coords2[1])**2)
 
-        # Bar element lenght
-        self.L = m.sqrt((self.node1.coords[0]-self.node2.coords[0])**2 + (self.node1.coords[1]-self.node2.coords[1])**2)
-
-        # Bar angle with +X axis and rotation matrix
-        r = self.node2.coords-self.node1.coords
+        r = self.coords2-self.coords1
         a = m.acos((r[0]*1 + r[1]*0)/(self.L*1))
+        print(a)
 
-        self.rotate_T = np.array([[m.cos(a), m.sin(a), 0, 0, 0, 0],
+        self.rotate_t = np.array([[m.cos(a), m.sin(a), 0, 0, 0, 0],
                                   [-m.sin(a), m.cos(a), 0, 0, 0, 0],
                                   [0, 0, 1, 0, 0, 0],
                                   [0, 0, 0, m.cos(a), m.sin(a), 0],
                                   [0, 0, 0, -m.sin(a), m.cos(a), 0],
                                   [0, 0, 0, 0, 0, 1]])
 
-        # Element shape functions
-        self.sf_1 = lambda s: (-1/self.L) * (s) + 1
-        self.sf_2 = lambda s: (1/self.L) * (s-self.L) + 1 
-
-        # Section properties
-        self.A = None
-
-        # Material Mechanical Properties
-        self.E = None
-
-        # Element-wise stiffness matrix for 4 DoFs
+        # Stiffness matrix intialization
         self.K_ = None
+
+
+class Bar(Element1D):
+    '''
+    Bar element that only resists axial deformation in its nodes.
+    '''
+
+    def __init__(self, node1: Node, node2: Node):
+
+        super().__init__(node1, node2)
+
+        # Initialize section and material properties
+        self.A = None
+        self.E = None
 
     def defineSectionProperties(self, A):
         self.A = A
@@ -59,7 +56,7 @@ class Bar(Element):
         self.E = E
 
     def resolveLocalStiffness(self):
-        K_unresolved = (self.E*self.A/self.L) * np.array([
+        K_unresolved = (self.E*self.A / self.L) * np.array([
                         [1, 0, 0, -1, 0, 0],
                         [0, 0, 0, 0, 0, 0],
                         [0, 0, 0, 0, 0, 0],
@@ -68,43 +65,30 @@ class Bar(Element):
                         [0, 0, 0, 0, 0, 0]
                         ])
         
-        K_unresolved = K_unresolved @ self.rotate_T
-        K_unresolved = self.rotate_T.transpose() @ K_unresolved
-        K_unresolved = (self.E*self.A / self.L) * K_unresolved
+        K_unresolved = K_unresolved @ self.rotate_t
+        K_unresolved = self.rotate_t.transpose() @ K_unresolved
         self.K_ = K_unresolved
 
         return self.K_
 
-    def retrieveLocalStiffness(self):
+    def getLocalStiffness(self):
         return self.K_
-    
-class Beam(Element):
-    # Euler-Bernoulli beam with axial deformation as well
+
+
+class Beam(Element1D):
+    '''
+    Euler-Bernoulli beam element that incorporates bar behaviour. 
+    '''
+
+
     def __init__(self, node1: None, node2: Node):
-        self._registry.append(self)
+        Element1D.elements.append(self)
 
-        self.node1 = node1
-        self.node2 = node2
-
-        self.DoFs = (self.node1.DoFs[0], self.node1.DoFs[1], self.node1.DoFs[2], self.node2.DoFs[0], self.node2.DoFs[1], self.node2.DoFs[2])
+        super().__init__(node1, node2)
 
         self.K_ = None
 
-        # Bar element lenght
-        self.L = m.sqrt((self.node1.coords[0]-self.node2.coords[0])**2 + (self.node1.coords[1]-self.node2.coords[1])**2)
-
-        # Bar angle with +X axis and rotation matrix
-        r = self.node2.coords-self.node1.coords
-        a = m.acos((r[0]*1 + r[1]*0)/(self.L*1))
-
-        self.rotate_T = np.array([[m.cos(a), m.sin(a), 0, 0, 0, 0],
-                                  [-m.sin(a), m.cos(a), 0, 0, 0, 0],
-                                  [0, 0, 1, 0, 0, 0],
-                                  [0, 0, 0, m.cos(a), m.sin(a), 0],
-                                  [0, 0, 0, -m.sin(a), m.cos(a), 0],
-                                  [0, 0, 0, 0, 0, 1]])
-
-        # Initialize geometric and material properties´
+        # Initialize section and material properties
         self.E = None
         self.A = None
         self.I_zz = None
@@ -142,12 +126,11 @@ class Beam(Element):
                         ])
         
         K_unresolved = K_beam + K_bar
-        K_unresolved = K_unresolved @ self.rotate_T
-        K_unresolved = self.rotate_T.transpose() @ K_unresolved
-        K_unresolved = K_unresolved
+        K_unresolved = K_unresolved @ self.rotate_t
+        K_unresolved = self.rotate_t.transpose() @ K_unresolved
         self.K_ = K_unresolved
 
         return self.K_
 
-    def retrieveLocalStiffness(self):
+    def getLocalStiffness(self):
         return self.K_
